@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        * {
+            padding: 0;
+            margin: 0;
+        }
+
+        #title {
+            padding: 5%;
+        }
+
+        canvas {
+            background: rgb(108, 230, 244);
+            display: block;
+            margin: 0 auto;
+        }
+
+        #start {
+            width: 100px;
+            height: 50px;
+        }
+
+        body {
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="title">
+        <h1>ブロックを崩すゲーム</h1>
+    </div>
+    <canvas id="myCanvas" width="480" height="320" style="display:none;"></canvas>
+    <div id="all_Button">
+        <button id="start">スタート</button>
+        <br><button id="rank">ランキング</button>
+        <!-- <button id="clear">ランクリセット</button> -->
+
+        <div id="result"></div>
+    </div>
+    <div id="clear_Button" style="display: none;">
+        <button id="save">セーブ</button>
+        <button id="next">Next Stage</button>
+    </div>
+
+    <!-- jquery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <!-- 追加部分① -->
+    <script type="module">
+        // Import the functions you need from the SDKs you need
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-app.js";
+        //  Add SDKs for Firebase products that you want to use
+        import {
+            getFirestore,
+            collection,
+            addDoc,
+            serverTimestamp,
+            query,
+            orderBy,
+            onSnapshot,
+            // scoreTOP3を表示
+            limit,
+        } from "https://www.gstatic.com/firebasejs//10.11.1/firebase-firestore.js";
+        // https://firebase.google.com/docs/web/setup#available-libraries
+
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyD6pmdpnQ6Kd5SZ4MmejCXnry7vCx9NjfI",
+            authDomain: "block-game-app-fc01d.firebaseapp.com",
+            projectId: "block-game-app-fc01d",
+            storageBucket: "block-game-app-fc01d.appspot.com",
+            messagingSenderId: "1096161249875",
+            appId: "1:1096161249875:web:baaac4620e8bdd3b1a54a6"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        // chatapp.html内に記述してある関数
+        // 時間の表示を変更する関数
+        function convertTimestampToDatetime(timestamp) {
+            const _d = timestamp ? new Date(timestamp * 1000) : new Date();
+            const Y = _d.getFullYear();
+            const m = (_d.getMonth() + 1).toString().padStart(2, "0");
+            const d = _d.getDate().toString().padStart(2, "0");
+            const H = _d.getHours().toString().padStart(2, "0");
+            const i = _d.getMinutes().toString().padStart(2, "0");
+            return `${Y - 1990 + 21}年${m}月${d}日 ${H}時${i}分`;
+        }
+
+
+
+
+
+        $(document).ready(function () {
+            function loadGameState() {
+                // Firestoreから最新のゲーム状態を取得する
+                const querySnapshot = getDocs(collection(db, "gameStates"));
+                querySnapshot.forEach((doc) => {
+                    const savedGameState = doc.data().gameState;
+
+                    // ゲーム状態を復元する
+                    x = savedGameState.x;
+                    y = savedGameState.y;
+                    dx = savedGameState.dx;
+                    dy = savedGameState.dy;
+                    paddleX = savedGameState.paddleX;
+                    score = savedGameState.score;
+                    lives = savedGameState.lives;
+                    // bricks = savedGameState.bricks;
+                    brickCount = savedGameState.brickCount;
+
+                    console.log("ゲームの状態を復元しました。");
+                });
+            };
+            //スタートを押した時
+            $("#start").on("click", function () {
+                //タイトルを消す
+                $("#title").css("display", "none");
+                //ボタンを消す
+                $("#all_Button").css("display", "none");
+
+                $("#myCanvas").css("display", "block");
+                //要素の参照
+                const canvas = $("#myCanvas").get(0);
+                //2D描画コンテキスト=キャンバスに描画するために使うツール
+                const ctx = canvas.getContext("2d");
+                // 図形の変数定義
+                // 円の半径
+                const ballRadius = 10;
+                //円の中心のx,y座標
+                let x = canvas.width / 2;
+                let y = canvas.height - 30;
+                //円の横に動く速さ
+                let dx = 5;
+                //円の縦に動く速さ
+                let dy = -5;
+                //バーの高さ
+                const paddleHeight = 10;
+                //バーの幅
+                const paddleWidth = 75;
+                //バーの開始地点X座標(中央)
+                let paddleX = (canvas.width - paddleWidth) / 2;
+                // 右キー認識用の変数
+                let rightPressed = false;
+                // 左キー認識用の変数
+                let leftPressed = false;
+                //壊すブロックを定義する定数
+                // ブロックの行数
+                const brickRowCount = 1;
+                //ブロックの列数
+                const brickColumnCount = 1;
+                //ブロックの個数
+                let brickCount = brickRowCount * brickColumnCount;
+                //ブロックの幅
+                const brickWidth = 75;
+                //ブロックの高さ
+                const brickHeight = 20;
+                // ブロック同士の幅
+                const brickPadding = 10;
+                // ブロックの位置（canvas上端からの距離）
+                const brickOffsetTop = 30;
+                // ブロックの位置（canvas左端からの距離）
+                const brickOffsetLeft = 30;
+                const bricks = [];
+                // 二次元配列を使ってブロックを作成
+                // ブロックの行のループ処理
+                for (let r = 0; r < brickRowCount; r++) {
+                    bricks[r] = [];
+                    // ブロックの列のループ処理
+                    for (let c = 0; c < brickColumnCount; c++) {
+                        //ブロックのプロパティを定義
+                        bricks[r][c] = { x: 0, y: 0, status: 1 };
+                    }
+                }
+                // スコアを計算する変数
+                let score = 0;
+                // let save_Score = score;
+                //プレイヤーの残ライフを計算する変数
+                let lives = 3;
+                // let save_Lives=lives;
+                let count_STAGE = 1;
+
+                //キーを「押した時」の処理用
+                $(document).keydown(keyDownHandler);
+                //キーを「離した時」の処理用
+                $(document).keyup(keyUpHandler);
+                //マウスを動かした時の処理用
+                $(document).mousemove(mouseMovehandler);
+                // スコアをFirebaseに保存する関数
+                function saveScore(score) {
+                    //コレクション"rankings"にドキュメントを追加
+                    addDoc(collection(db, "rankings"), {
+                        score: score,
+                        timestamp: serverTimestamp()
+                    })
+                }
+                // キーが押された時の処理
+                function keyDownHandler() {
+                    //IE / Edge用に"Right"の指示がいるらしい！（"Left"も同様）
+                    if (event.key === "Right" || event.key === "ArrowRight") {
+                        //右用の変数をfalse→trueへ
+                        rightPressed = true;
+                    } else if (event.key === "Left" || event.key === "ArrowLeft") {
+                        //左用の変数をfalse→trueへ
+                        leftPressed = true;
+                    }
+                }
+                // キーが離された時の処理
+                function keyUpHandler() {
+                    if (event.key === "Right" || event.key === "ArrowRight") {
+                        //右用の変数をtrue→falseへ
+                        rightPressed = false;
+                    } else if (event.key === "Left" || event.key === "ArrowLeft") {
+                        //左用の変数をtrue→falseへ
+                        leftPressed = false;
+                    }
+                }
+                // マウスを動かした時の処理
+                function mouseMovehandler() {
+                    //キャンバスの左端からマウスカーソルの水平位置までの距離の定数
+                    const relativeX = event.clientX - canvas.offsetLeft;
+                    //条件：マウスカーソルの水平位置がキャンバス内にある
+                    if (relativeX > 0 && relativeX < canvas.width) {
+                        // マウスカーソルの水平位置にバーの真ん中部分が来るようにする
+                        paddleX = relativeX - paddleWidth / 2;
+                    }
+                }
+                // 弾とブロックが衝突した時の処理
+                function collisionDetection() {
+                    for (let r = 0; r < brickRowCount; r++) {
+                        for (let c = 0; c < brickColumnCount; c++) {
+                            // ループ処理によるブロックの定義
+                            const b = bricks[r][c];
+                            //条件：ブロックプロパティのstatusが１
+                            if (b.status === 1) {
+                                //条件:弾の中心のx座標>ブロック左端のx座標かつ、弾の中心のx座標<ブロック右端のx座標
+                                //   かつ弾の中心のy座標>ブロック上端のy座標かつ、弾の中心のy座標<ブロック下端のy座標
+                                // (つまり弾がブロックに当たった時)
+                                if (x + ballRadius > b.x && x - ballRadius < b.x + brickWidth && y + ballRadius > b.y && y - ballRadius < b.y + brickHeight) {
+                                    // 弾が跳ね返る
+                                    dy = -dy;
+                                    // ブロックが描画されなくなる(消える)
+                                    b.status = 0;
+                                    //スコアをプラス
+                                    score += 20;
+                                    // ブロックのカウントをマイナス
+                                    brickCount--;
+
+
+                                }
+                            }
+                        }
+                    }
+                }
+
+
+                //円の描画
+                function drawBall() {
+                    //描画コード
+                    ctx.beginPath();
+                    ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
+                    ctx.fillStyle = "white";
+                    ctx.fill();
+                    ctx.closePath();
+                }
+                //パドルの描画
+                function drawPaddle() {
+                    //描画コード
+                    ctx.beginPath();
+                    ctx.rect(paddleX, canvas.height - paddleHeight, paddleWidth, paddleHeight);
+                    ctx.fillStyle = "silver";
+                    ctx.fill();
+                    ctx.closePath();
+                }
+                function drawBricks() {
+                    for (let r = 0; r < brickRowCount; r++) {
+                        for (let c = 0; c < brickColumnCount; c++) {
+                            // status=1の時だけ描画
+                            if (bricks[r][c].status == 1) {
+                                // ブロックのx座標定義
+                                //等間隔で並ぶような処理
+                                const brickX = (c * (brickWidth + brickPadding)) + brickOffsetLeft;
+                                // ブロックのy座標定義
+                                const brickY = (r * (brickHeight + brickPadding)) + brickOffsetTop;
+                                //ブロックのxプロパティにブロックのx座標を反映
+                                bricks[r][c].x = brickX;
+                                //ブロックのyプロパティにブロックのy座標を反映
+                                bricks[r][c].y = brickY;
+                                // ブロック描画
+                                ctx.beginPath();
+                                ctx.rect(brickX, brickY, brickWidth, brickHeight);
+                                ctx.fillStyle = "green";
+                                ctx.fill();
+                                ctx.closePath();
+                            }
+                        }
+                    }
+                }
+                // スコアを画面上に出す
+                function drawScore() {
+                    ctx.font = "16px Arial";
+                    ctx.fillStyle = "black";
+                    ctx.fillText("Score:" + score, 8, 20);
+                }
+                //残りライフを画面上に出す
+                function drawLives() {
+                    ctx.font = "16px Arial";
+                    ctx.fillStyle = "black";
+                    ctx.fillText("Lives:" + lives, canvas.width - 65, 20);
+                }
+                //コレクション"gameState"にドキュメントを追加
+
+
+
+                //全描画をまとめた処理
+                function draw() {
+                    //canvasの内容を消去する
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    drawBricks();
+                    drawBall();
+                    drawPaddle();
+                    drawScore();
+                    drawLives();
+                    collisionDetection();
+                    //壁を跳ね返るようにする条件式
+                    //円が右端か左端に行った時
+                    if (x + dx > canvas.width - ballRadius || x + dx < ballRadius) {
+                        //ボールの半径を基準にしているのは、ボールの中心ではなくボールの外側で
+                        // あたった時に跳ね返るようにするため
+
+                        //跳ね返る
+                        dx = -dx;
+                    }
+                    //円が上端に行った時
+                    if (y + dy < ballRadius) {
+                        //跳ね返る
+                        dy = -dy;
+                    }
+                    // 円が下に落ちた時
+                    else if (y + dy > canvas.height - ballRadius) {
+
+                        if (x > paddleX && x < paddleX + paddleWidth) {
+                            dy = -dy;
+
+                        }
+                        else {
+                            lives--;
+                            if (lives === 0) {
+                                saveScore(score);
+                                alert("GAME OVER コードを書け");
+                                $("#title").css("display", "block");
+                                $("#all_Button").css("display", "block");
+                                $("#myCanvas").css("display", "none");
+                                dx = 0;
+                                dy = 0;
+                            }
+                            else {
+                                x = canvas.width / 2;
+                                y = canvas.height - 30;
+                                dx = 5;
+                                dy = -5;
+                                paddleX = (canvas.width - paddleWidth) / 2;
+                                score -= 80;
+                            }
+                        }
+                    }
+                    if (rightPressed && paddleX < canvas.width - paddleWidth) {
+                        paddleX += 7;
+
+                    } else if (leftPressed && paddleX > 0) {
+                        paddleX -= 7;
+                    }
+                    x += dx;
+                    y += dy;
+
+                    if (brickCount === 0) {
+                        function draw_STAGE_CLEAR() {
+                            ctx.font = "50px Arial";
+                            ctx.fillStyle = "red";
+                            ctx.fillText("STAGE CLEAR!", (canvas.width / 2) - 180, canvas.height / 2);
+                            // let save_Score=score;
+                            // let save_Lives=lives;
+
+                        }
+                        draw_STAGE_CLEAR();
+                        $("#clear_Button").css("display", "block");
+                        //    $("#save").on("click", saveGameState());
+                        // スコアを保存する
+                        // saveScore(score);
+                        // アラートを表示
+                        // alert("クリア！コードを書け！");
+                        // ゲームオーバー状態にする
+
+                        // $("#title").css("display", "block");
+                        // $("#all_Button").css("display", "block");
+                        // $("#myCanvas").css("display", "none");
+                        // dx = 0;
+                        // dy = 0;
+
+                        // cancelAnimationFrame(animationFrameId);
+                        dx = 0;
+                        dy = 0;
+                        //                 $("#next").on("click", function () {
+                        //     cancelAnimationFrame(draw);
+                        // });
+
+
+
+                    }
+                    requestAnimationFrame(draw);
+
+                }
+                draw();
+                function saveGameState() {
+                    const gameState = {
+                        x: x,
+                        y: y,
+                        dx: dx,
+                        dy: dy,
+                        paddleX: paddleX,
+                        score: save_Score,
+                        lives: save_Lives,
+                        // bricks: ,
+                        brickCount: brickCount
+                    };
+
+                    // Firestoreに保存する
+                    addDoc(collection(db, "gameStates"), {
+                        gameState: gameState,
+                        timestamp: serverTimestamp()
+                    }).then(() => {
+                        console.log("ゲームの状態を保存しました。");
+                    }).catch((error) => {
+                        console.error("ゲームの状態の保存中にエラーが発生しました:", error);
+                    });
+                }
+
+                // 保存された状態を読み込んで復元する関数
+
+                $("#save").on("click", saveGameState());
+                // function resetGame() {
+                //     // ボールの位置と速度を初期化
+                //     x = canvas.width / 2;
+                //     y = canvas.height - 30;
+                //     dx = 5;
+                //     dy = -5;
+
+                //     // パドルの位置を初期化
+                //     paddleX = (canvas.width - paddleWidth) / 2;
+
+                //     // ブロックの状態を再初期化
+                //     for (let r = 0; r < brickRowCount; r++) {
+                //         for (let c = 0; c < brickColumnCount; c++) {
+                //             bricks[r][c].status = 1;
+                //             let brickCount = brickRowCount * brickColumnCount;
+                //             x += dx;
+                //             y += dy;
+                //         }
+                //     }
+                // }
+
+
+                $("#next").on("click", function () {
+                    const canvas = $("#myCanvas").get(0);
+                    //2D描画コンテキスト=キャンバスに描画するために使うツール
+                    const ctx = canvas.getContext("2d");
+                    // 図形の変数定義
+                    // 円の半径
+                    const ballRadius = 10;
+                    //円の中心のx,y座標
+                    let x = canvas.width / 2;
+                    let y = canvas.height - 30;
+                    //円の横に動く速さ
+                    let dx = 5;
+                    //円の縦に動く速さ
+                    let dy = -5;
+                    //バーの高さ
+                    const paddleHeight = 10;
+                    //バーの幅
+                    const paddleWidth = 75;
+                    //バーの開始地点X座標(中央)
+                    let paddleX = (canvas.width - paddleWidth) / 2;
+                    // 右キー認識用の変数
+                    let rightPressed = false;
+                    // 左キー認識用の変数
+                    let leftPressed = false;
+                    //壊すブロックを定義する定数
+                    // ブロックの行数
+                    const brickRowCount = 1;
+                    //ブロックの列数
+                    const brickColumnCount = 1;
+                    //ブロックの個数
+                    let brickCount = brickRowCount * brickColumnCount;
+                    //ブロックの幅
+                    const brickWidth = 75;
+                    //ブロックの高さ
+                    const brickHeight = 20;
+                    // ブロック同士の幅
+                    const brickPadding = 10;
+                    // ブロックの位置（canvas上端からの距離）
+                    const brickOffsetTop = 30;
+                    // ブロックの位置（canvas左端からの距離）
+                    const brickOffsetLeft = 30;
+                    const bricks = [];
+                    // 二次元配列を使ってブロックを作成
+                    // ブロックの行のループ処理
+                    for (let r = 0; r < brickRowCount; r++) {
+                        bricks[r] = [];
+                        // ブロックの列のループ処理
+                        for (let c = 0; c < brickColumnCount; c++) {
+                            //ブロックのプロパティを定義
+                            bricks[r][c] = { x: 0, y: 0, status: 1 };
+                        }
+                    }
+                    // スコアを計算する変数
+                    let score = save_Score;
+                    //プレイヤーの残ライフを計算する変数
+                    let lives = save_Lives;
+                    let count_STAGE = 1;
+
+                    //キーを「押した時」の処理用
+                    $(document).keydown(keyDownHandler);
+                    //キーを「離した時」の処理用
+                    $(document).keyup(keyUpHandler);
+                    //マウスを動かした時の処理用
+                    $(document).mousemove(mouseMovehandler);
+                    // スコアをFirebaseに保存する関数
+                    function saveScore(score) {
+                        //コレクション"rankings"にドキュメントを追加
+                        addDoc(collection(db, "rankings"), {
+                            score: score,
+                            timestamp: serverTimestamp()
+                        })
+                        // .then(function(docRef){
+                        //      console.log("スコアOK.Document ID: ", docRef.id);
+                        //  })
+
+                        // .catch(function(error){
+                        //     console.error("スコアの保存中にエラーが発生しました:",error);
+                        // });
+                    }
+                    // キーが押された時の処理
+                    function keyDownHandler() {
+                        //IE / Edge用に"Right"の指示がいるらしい！（"Left"も同様）
+                        if (event.key === "Right" || event.key === "ArrowRight") {
+                            //右用の変数をfalse→trueへ
+                            rightPressed = true;
+                        } else if (event.key === "Left" || event.key === "ArrowLeft") {
+                            //左用の変数をfalse→trueへ
+                            leftPressed = true;
+                        }
+                    }
+                    // キーが離された時の処理
+                    function keyUpHandler() {
+                        if (event.key === "Right" || event.key === "ArrowRight") {
+                            //右用の変数をtrue→falseへ
+                            rightPressed = false;
+                        } else if (event.key === "Left" || event.key === "ArrowLeft") {
+                            //左用の変数をtrue→falseへ
+                            leftPressed = false;
+                        }
+                    }
+                    // マウスを動かした時の処理
+                    function mouseMovehandler() {
+                        //キャンバスの左端からマウスカーソルの水平位置までの距離の定数
+                        const relativeX = event.clientX - canvas.offsetLeft;
+                        //条件：マウスカーソルの水平位置がキャンバス内にある
+                        if (relativeX > 0 && relativeX < canvas.width) {
+                            // マウスカーソルの水平位置にバーの真ん中部分が来るようにする
+                            paddleX = relativeX - paddleWidth / 2;
+                        }
+                    }
+                    // 弾とブロックが衝突した時の処理
+                    function collisionDetection() {
+                        for (let r = 0; r < brickRowCount; r++) {
+                            for (let c = 0; c < brickColumnCount; c++) {
+                                // ループ処理によるブロックの定義
+                                const b = bricks[r][c];
+                                //条件：ブロックプロパティのstatusが１
+                                if (b.status === 1) {
+                                    //条件:弾の中心のx座標>ブロック左端のx座標かつ、弾の中心のx座標<ブロック右端のx座標
+                                    //   かつ弾の中心のy座標>ブロック上端のy座標かつ、弾の中心のy座標<ブロック下端のy座標
+                                    // (つまり弾がブロックに当たった時)
+                                    if (x + ballRadius > b.x && x - ballRadius < b.x + brickWidth && y + ballRadius > b.y && y - ballRadius < b.y + brickHeight) {
+                                        // 弾が跳ね返る
+                                        dy = -dy;
+                                        // ブロックが描画されなくなる(消える)
+                                        b.status = 0;
+                                        //スコアをプラス
+                                        score += 20;
+                                        // ブロックのカウントをマイナス
+                                        brickCount--;
+
+
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+
+                    //円の描画
+                    function drawBall() {
+                        //描画コード
+                        ctx.beginPath();
+                        ctx.arc(x, y, ballRadius, 0, Math.PI * 2);
+                        ctx.fillStyle = "white";
+                        ctx.fill();
+                        ctx.closePath();
+                    }
+                    //パドルの描画
+                    function drawPaddle() {
+                        //描画コード
+                        ctx.beginPath();
+                        ctx.rect(paddleX, canvas.height - paddleHeight, paddleWidth, paddleHeight);
+                        ctx.fillStyle = "silver";
+                        ctx.fill();
+                        ctx.closePath();
+                    }
+                    function drawBricks() {
+                        for (let r = 0; r < brickRowCount; r++) {
+                            for (let c = 0; c < brickColumnCount; c++) {
+                                // status=1の時だけ描画
+                                if (bricks[r][c].status == 1) {
+                                    // ブロックのx座標定義
+                                    //等間隔で並ぶような処理
+                                    const brickX = (c * (brickWidth + brickPadding)) + brickOffsetLeft;
+                                    // ブロックのy座標定義
+                                    const brickY = (r * (brickHeight + brickPadding)) + brickOffsetTop;
+                                    //ブロックのxプロパティにブロックのx座標を反映
+                                    bricks[r][c].x = brickX;
+                                    //ブロックのyプロパティにブロックのy座標を反映
+                                    bricks[r][c].y = brickY;
+                                    // ブロック描画
+                                    ctx.beginPath();
+                                    ctx.rect(brickX, brickY, brickWidth, brickHeight);
+                                    ctx.fillStyle = "green";
+                                    ctx.fill();
+                                    ctx.closePath();
+                                }
+                            }
+                        }
+                    }
+                    // スコアを画面上に出す
+                    function drawScore() {
+                        ctx.font = "16px Arial";
+                        ctx.fillStyle = "black";
+                        ctx.fillText("Score:" + score, 8, 20);
+                    }
+                    //残りライフを画面上に出す
+                    function drawLives() {
+                        ctx.font = "16px Arial";
+                        ctx.fillStyle = "black";
+                        ctx.fillText("Lives:" + lives, canvas.width - 65, 20);
+                    }
+                    //全描画をまとめた処理
+                    let animationFrameId = requestAnimationFrame(draw);
+                    function draw() {
+                        //canvasの内容を消去する
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        drawBricks();
+                        drawBall();
+                        drawPaddle();
+                        drawScore();
+                        drawLives();
+                        collisionDetection();
+                        //壁を跳ね返るようにする条件式
+                        //円が右端か左端に行った時
+                        if (x + dx > canvas.width - ballRadius || x + dx < ballRadius) {
+                            //ボールの半径を基準にしているのは、ボールの中心ではなくボールの外側で
+                            // あたった時に跳ね返るようにするため
+
+                            //跳ね返る
+                            dx = -dx;
+                        }
+                        //円が上端に行った時
+                        if (y + dy < ballRadius) {
+                            //跳ね返る
+                            dy = -dy;
+                        }
+                        // 円が下に落ちた時
+                        else if (y + dy > canvas.height - ballRadius) {
+
+                            if (x > paddleX && x < paddleX + paddleWidth) {
+                                dy = -dy;
+
+                            }
+                            else {
+                                lives--;
+                                if (lives === 0) {
+                                    saveScore(score);
+                                    alert("GAME OVER コードを書け");
+                                    $("#title").css("display", "block");
+                                    $("#all_Button").css("display", "block");
+                                    $("#myCanvas").css("display", "none");
+                                    dx = 0;
+                                    dy = 0;
+                                }
+                                else {
+                                    x = canvas.width / 2;
+                                    y = canvas.height - 30;
+                                    dx = 5;
+                                    dy = -5;
+                                    paddleX = (canvas.width - paddleWidth) / 2;
+                                    score -= 80;
+                                }
+                            }
+                        }
+                        if (rightPressed && paddleX < canvas.width - paddleWidth) {
+                            paddleX += 7;
+
+                        } else if (leftPressed && paddleX > 0) {
+                            paddleX -= 7;
+                        }
+                        x += dx;
+                        y += dy;
+
+                        if (brickCount === 0) {
+                            function draw_STAGE_CLEAR() {
+                                ctx.font = "50px Arial";
+                                ctx.fillStyle = "red";
+                                ctx.fillText("おめでとう！", (canvas.width / 2) - 160, canvas.height / 2);
+
+                            }
+                            draw_STAGE_CLEAR();
+                            $("#clear_Button").css("display", "none");
+                            saveScore(score);
+                            setTimeout(function () {
+
+                                $("#title").css("display", "block");
+                                $("#all_Button").css("display", "block");
+
+                                $("#myCanvas").css("display", "none");
+                            }, 2000)
+                            // スコアを保存する
+                            // saveScore(score);
+                            // アラートを表示
+                            // alert("クリア！コードを書け！");
+                            // ゲームオーバー状態にする
+
+                            // $("#title").css("display", "block");
+                            // $("#all_Button").css("display", "block");
+                            // $("#myCanvas").css("display", "none");
+                            // dx = 0;
+                            // dy = 0;
+
+                            // cancelAnimationFrame(animationFrameId);
+                            dx = 0;
+                            dy = 0;
+                            //                 $("#next").on("click", function () {
+                            //     cancelAnimationFrame(draw);
+                            // });
+
+
+
+                        }
+
+
+                        requestAnimationFrame(draw);
+
+                    }
+                    // 描画ループを停止する
+                    // let animationFrameId = requestAnimationFrame(draw);
+                    // cancelAnimationFrame(animationFrameId);
+
+
+
+                    // resetGame();
+                    //     $("#all_Button").css("display","block");
+                    //  draw();
+                    // animationFrameId = requestAnimationFrame(draw);
+                    // requestAnimationFrame(draw);
+                });
+
+                //draw();
+
+            });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            // firebase内のスコアを高い順に並べる
+            const q = query(collection(db, "rankings"), orderBy("score", "desc"), limit(3));
+            onSnapshot(q, (querySnapshot) => {
+                //データの確認
+                console.log(querySnapshot.docs);
+
+                const documents = [];
+                //forEach 繰り返し処理
+                querySnapshot.docs.forEach(function (doc) {
+                    const document = {
+                        id: doc.id,
+                        data: doc.data(),
+                    };
+                    documents.push(document);
+
+                });
+                // データ確認
+                console.log(documents);
+                const htmlElements = [];
+                documents.forEach(function (document) {
+                    const scoreData = document.data;
+                    const timestamp = scoreData.timestamp;
+                    const formattedTimestamp = convertTimestampToDatetime(timestamp);
+                    htmlElements.push(`<li id="${document.id}">
+      <p>プレイした日:${formattedTimestamp}  スコア:${scoreData.score}ポイント</p>
+    </li>`);
+                });
+                $("#rank").on("click", function () {
+                    // id=resultに反映
+                    $("#result").html(htmlElements);
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>
